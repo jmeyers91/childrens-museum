@@ -1,0 +1,31 @@
+const config = require('./config');
+const path = require('path');
+const local = p => path.join(__dirname, p);
+
+module.exports = {
+  output: {
+    path: local('../server/public'),
+    filename: 'bundle.js',
+  },
+  entry: local('src/entry.js'),
+  module: {
+    rules: [
+      {
+        test: /\.html$/,
+        use: {
+          loader: 'file-loader',
+          options: { name: '[name].[ext]' }
+        },
+      },
+      {
+        test: /\.(jpg|png)$/,
+        use: 'file-loader',
+      },
+    ],
+  },
+  devServer: {
+    proxy: {
+      "/socket.io/": config.server,
+    }
+  },
+};

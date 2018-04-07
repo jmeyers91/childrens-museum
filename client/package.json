@@ -1,0 +1,22 @@
+{
+  "name": "childrens-museum-client",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "npx webpack",
+    "watch": "npx webpack-dev-server",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "file-loader": "^1.1.11"
+  },
+  "dependencies": {
+    "nanoid": "^1.0.2",
+    "p2": "^0.7.1",
+    "phaser": "^3.3.0",
+    "pixi.js": "^4.7.3"
+  }
+}
