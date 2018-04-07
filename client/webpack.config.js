@@ -23,9 +23,4 @@ module.exports = {
       },
     ],
   },
-  devServer: {
-    proxy: {
-      "/socket.io/": config.server,
-    }
-  },
 };
