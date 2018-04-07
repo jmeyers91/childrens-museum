@@ -1,10 +1,14 @@
 const nanoid = require('nanoid');
 
 module.exports = function startGameServer(io) {
-  io.on('connection', onConnect);
+  io.on('connection', socket => onConnect(socket, io));
 };
 
-function onConnect(socket) {
+function onConnect(socket, io) {
+  const maxFireLevel = 20;
+  const minFireLevel = 1;
+  let fireLevel = 1;
+
   const player = {
     id: nanoid(),
     x: Math.random() * 800,
@@ -14,9 +18,17 @@ function onConnect(socket) {
 
   socket.on('ready', () => {
     socket.emit('init', {
-      yourId: player.id
+      yourId: player.id,
+      fireLevel
     });
     socket.broadcast.emit('addPlayer', player);
+  });
+
+  socket.on('feedFire', () => {
+    if(fireLevel < maxFireLevel) {
+      fireLevel += 1;
+      io.emit('fireLevel', { fireLevel });
+    }
   });
 
   socket.on('grabLog', log => socket.broadcast.emit('grabLog', log));
@@ -26,4 +38,11 @@ function onConnect(socket) {
   socket.on('disconnect', () => {
 
   });
+
+  setInterval(() => {
+    if(fireLevel > minFireLevel) {
+      fireLevel -= 1;
+      io.emit('fireLevel', { fireLevel });
+    }
+  }, 30000);
 }

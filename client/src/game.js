@@ -6,6 +6,7 @@ import nanoid from 'nanoid';
 
 const width = 960;
 const height = 540;
+const woodRespawnDelay = 5000; // ms
 
 const center = {x: width / 2, y: height / 2};
 
@@ -36,15 +37,34 @@ function create() {
   const game = this;
   const logs = new Map();
   const background = this.add.sprite(center.x, center.y, 'campingscene', 'background.png').setScale(0.5);
-  const fire = createFire();
+  const firePosition = {
+    x: 200,
+    y: height - 20,
+  };
 
-  const draggableLogs = [
-    createDraggableLog({x: width * 0.2, y: height - 65, spriteId: 'log_a'}),
-    createDraggableLog({x: (width * 0.2) + 50, y: height - 50, spriteId: 'log_b'}),
-    createDraggableLog({x: (width * 0.2) + 100, y: height - 65, spriteId: 'log_c'}),
-  ];
+  const draggableLogAreaPosition = {
+    x: width * 0.8,
+    y: height - 50,
+  };
+
+  // Add fire and static logs around it
+  createLog({x: firePosition.x - 50, y: firePosition.y - 50, spriteId: 'log_c'});
+  createLog({x: firePosition.x + 50, y: firePosition.y - 40, spriteId: 'log_a'});
+  const fire = createFire();
+  createLog({x: firePosition.x - 50, y: firePosition.y - 10, spriteId: 'log_a'});
+  createLog({x: firePosition.x + 20, y: firePosition.y - 10, spriteId: 'log_b'});
+
+  // Add draggable logs
+  const draggableLogs = ['log_a', 'log_b', 'log_c'].map((spriteId, i) => {
+    return createDraggableLog({
+      spriteId,
+      x: draggableLogAreaPosition.x + (i * 50),
+      y: draggableLogAreaPosition.y + ((Math.random() * 50) - 25)
+    });
+  });
 
   socket.on('grabLog', createLog);
+
   socket.on('moveLog', remoteLog => {
     const log = logs.get(remoteLog.id);
     if(log) {
@@ -53,6 +73,7 @@ function create() {
       createLog(remoteLog);
     }
   });
+
   socket.on('dropLog', remoteLog => {
     const log = logs.get(remoteLog.id);
     if(log) {
@@ -60,6 +81,14 @@ function create() {
       logs.delete(log.id);
     }
   });
+
+  socket.on('fireLevel', ({ fireLevel }) => setFireLevel(fireLevel));
+
+  socket.on('init', ({ fireLevel }) => {
+    setFireLevel(fireLevel);
+  });
+
+  socket.emit('ready');
 
   function createLog({id, x, y, spriteId}) {
     const sprite = game.add.image(x, y, spriteId).setScale(0.5);
@@ -76,8 +105,16 @@ function create() {
         log.x = sprite.x = x;
         log.y = sprite.y = y;
       },
-      reset() {
-        log.updatePosition(x, y);
+      reset(duration) {
+        if(duration) {
+          game.tweens.add({
+            targets: [sprite],
+            x, y,
+            duration: 100,
+          });
+        } else {
+          log.updatePosition(x, y);
+        }
       },
     };
     logs.set(log.id, log);
@@ -100,22 +137,36 @@ function create() {
 
     sprite.on('dragend', () => {
       socket.emit('dropLog', log);
-      log.reset();
+      if(isOverlapping(sprite, fire)) {
+        socket.emit('feedFire');
+        log.reset(0);
+        sprite.alpha = 0;
+
+        setTimeout(() => {
+          game.tweens.add({
+            targets: [sprite],
+            alpha: 1,
+            duration: 300,
+          });
+        }, woodRespawnDelay);
+      } else {
+        log.reset(100);
+      }
     });
 
     return log;
   }
 
-  function createFire(animation='small') {
-    const fire = this.add.sprite(100, 100, 'campingscene', 'small/1.png');
-    const smallFireFrames = this.anims.generateFrameNames('campingscene', {
+  function createFire() {
+    const fire = game.add.sprite(firePosition.x, firePosition.y, 'campingscene', 'small/1.png');
+    const smallFireFrames = game.anims.generateFrameNames('campingscene', {
       start: 1,
       end: 3,
       zeroPad: 0,
       prefix: 'small/',
       suffix: '.png'
     });
-    const largeFireFrames = this.anims.generateFrameNames('campingscene', {
+    const largeFireFrames = game.anims.generateFrameNames('campingscene', {
       start: 1,
       end: 3,
       zeroPad: 0,
@@ -123,14 +174,38 @@ function create() {
       suffix: '.png'
     });
 
-    this.anims.create({ key: 'small', frames: smallFireFrames, frameRate: 10, repeat: -1 });
-    this.anims.create({ key: 'large', frames: largeFireFrames, frameRate: 10, repeat: -1 });
-    fire.anims.play(animation);
+    game.anims.create({ key: 'small', frames: smallFireFrames, frameRate: 10, repeat: -1 });
+    game.anims.create({ key: 'large', frames: largeFireFrames, frameRate: 10, repeat: -1 });
 
     return fire;
   }
 
   function setFireAnimation(animation) {
     fire.anims.play(animation);
+    fire.x = firePosition.x;
+    fire.y = firePosition.y - (fire.height / 2);
+  }
+
+  function setFireLevel(fireLevel) {
+    if(fireLevel <= 5) {
+      setFireAnimation('small');
+    } else {
+      setFireAnimation('large');
+    }
+  }
+
+  function isOverlapping(spriteA, spriteB) {
+    const topLeft = getTopLeft(spriteB);
+    return spriteA.x >= topLeft.x &&
+      spriteA.y >= topLeft.y &&
+      spriteA.x < (topLeft.x + spriteB.width) &&
+      spriteA.y < (topLeft.y + spriteB.height);
+  }
+
+  function getTopLeft(sprite) {
+    return {
+      x: sprite.x - (sprite.width / 2),
+      y: sprite.y - (sprite.height / 2),
+    };
   }
 }
