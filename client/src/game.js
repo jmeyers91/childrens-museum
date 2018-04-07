@@ -2,9 +2,10 @@ import { throttle, range } from 'lodash';
 import config from '../config';
 import socket from './socket';
 import Phaser from './Phaser';
+import nanoid from 'nanoid';
 
-const width = 1182;
-const height = 664;
+const width = 960;
+const height = 540;
 
 const center = {x: width / 2, y: height / 2};
 
@@ -24,134 +25,112 @@ export default function startGame() {
 
 function preload() {
   this.load.setBaseURL(config.server);
-  this.load.image('background', require('./assets/background-02.png'));
-  this.load.image('log', require('./assets/log_small.png'));
-  this.load.image('fire', require('./assets/fire.png'));
+  this.load.image('background', require('./assets/background.png'));
+  this.load.image('log_a', require('./assets/log_a.png'));
+  this.load.image('log_b', require('./assets/log_b.png'));
+  this.load.image('log_c', require('./assets/log_c.png'));
+  this.load.atlas('campingscene', require('./assets/scene.png'), require('file-loader!./assets/scene.json'));
 }
 
 function create() {
   const game = this;
-  const playerLogs = new Map();
-  const logStartPosition = center;
-  let currentPlayerId;
-  let draggableLog;
+  const logs = new Map();
+  const background = this.add.sprite(center.x, center.y, 'campingscene', 'background.png').setScale(0.5);
+  const fire = createFire();
 
-  const background = game.add.image(center.x, center.y, 'background');
-  const fire = game.add.image(325, 500, 'fire');
+  const draggableLogs = [
+    createDraggableLog({x: width * 0.2, y: height - 65, spriteId: 'log_a'}),
+    createDraggableLog({x: (width * 0.2) + 50, y: height - 50, spriteId: 'log_b'}),
+    createDraggableLog({x: (width * 0.2) + 100, y: height - 65, spriteId: 'log_c'}),
+  ];
 
-  socket.on('init', init);
-  socket.on('moveLog', moveLog);
-  socket.on('removePlayer', removePlayer);
-  socket.on('destroyLog', destroyPlayerLog);
-  socket.emit('ready');
-
-  function init(state) {
-    currentPlayerId = state.currentPlayerId;
-    createDraggableLog();
-  }
-
-  function moveLog({ playerId, x, y }) {
-    if(!playerLogs.has(playerId)) {
-      playerLogs.set(playerId, createLog(playerId, x, y, false));
+  socket.on('grabLog', createLog);
+  socket.on('moveLog', remoteLog => {
+    const log = logs.get(remoteLog.id);
+    if(log) {
+      log.updatePosition(remoteLog.x, remoteLog.y);
+    } else {
+      createLog(remoteLog);
     }
-    const log = playerLogs.get(playerId);
-    log.x = log.sprite.x = x;
-    log.y = log.sprite.y = y;
-  }
-
-  function removePlayer({ playerId }) {
-    destroyPlayerLog({ playerId });
-  }
-
-  function remove(array, value) {
-    const index = array.indexOf(value);
-    if(index !== -1) {
-      array.splice(index, 1);
+  });
+  socket.on('dropLog', remoteLog => {
+    const log = logs.get(remoteLog.id);
+    if(log) {
+      log.getSprite().destroy();
+      logs.delete(log.id);
     }
-  }
+  });
 
-  function createLog(playerId, startX, startY, draggable) {
-    const sprite = game.add.image(startX, startY, 'log');
+  function createLog({id, x, y, spriteId}) {
+    const sprite = game.add.image(x, y, spriteId).setScale(0.5);
     const log = {
-      playerId,
-      sprite,
-      x: startX,
-      y: startY,
+      id: id || nanoid(),
+      initialX: x,
+      initialY: y,
+      x, y, spriteId,
+      getSprite() {
+        return sprite;
+      },
+      updatePosition(x, y) {
+        const sprite = log.getSprite();
+        log.x = sprite.x = x;
+        log.y = sprite.y = y;
+      },
+      reset() {
+        log.updatePosition(x, y);
+      },
     };
+    logs.set(log.id, log);
+    return log;
+  }
 
-    if(draggable) {
-      sprite.setInteractive();
+  function createDraggableLog(props) {
+    const log = createLog(props);
+    const sprite = log.getSprite();
 
-      sprite.on('drag', (pointer, x, y) => {
-        sprite.x = log.x = x;
-        sprite.y = log.y = y;
-        socket.emit('moveLog', {x, y});
-      });
+    sprite.setInteractive();
+    game.input.setDraggable(sprite);
 
-      sprite.on('dragend', async (pointer, x, y) => {
-        console.log(x, y, fire);
-        if(isOverlapping(sprite, fire)) {
-          socket.emit('feedFire');
-          await burnLog(draggableLog);
-          createDraggableLog();
-        } else {
-          socket.emit('destroyLog');
-          sprite.x = log.x = startX;
-          sprite.y = log.y = startY;
-        }
-      });
+    sprite.on('dragstart', () => socket.emit('grabLog', log));
 
-      game.input.setDraggable(sprite);
-    }
+    sprite.on('drag', (pointer, x, y) => {
+      log.updatePosition(x, y);
+      socket.emit('moveLog', log);
+    });
+
+    sprite.on('dragend', () => {
+      socket.emit('dropLog', log);
+      log.reset();
+    });
 
     return log;
   }
 
-  function burnLog(log) {
-    return new Promise(resolve => {
-      const duration = 300;
-      game.tweens.add({
-        targets: [log.sprite],
-        x: fire.x,
-        y: fire.y + (fire.height * 0.2),
-        duration: 300,
-        repeat: 1,
-      });
-      setTimeout(() => {
-        destroyLog(log);
-        resolve();
-      }, 300);
+  function createFire(animation='small') {
+    const fire = this.add.sprite(100, 100, 'campingscene', 'small/1.png');
+    const smallFireFrames = this.anims.generateFrameNames('campingscene', {
+      start: 1,
+      end: 3,
+      zeroPad: 0,
+      prefix: 'small/',
+      suffix: '.png'
     });
+    const largeFireFrames = this.anims.generateFrameNames('campingscene', {
+      start: 1,
+      end: 3,
+      zeroPad: 0,
+      prefix: 'large/',
+      suffix: '.png'
+    });
+
+    this.anims.create({ key: 'small', frames: smallFireFrames, frameRate: 10, repeat: -1 });
+    this.anims.create({ key: 'large', frames: largeFireFrames, frameRate: 10, repeat: -1 });
+    fire.anims.play(animation);
+
+    return fire;
   }
 
-  function otherPlayerFeedFire({ playerId }) {
-    const log = playerLogs.get(playerId);
-    if(log) burnLog(log);
-  }
-
-  function destroyPlayerLog({ playerId }) {
-    destroyLog(playerLogs.get(playerId));
-  }
-
-  function destroyLog(log) {
-    if(log) {
-      log.sprite.destroy();
-      playerLogs.delete(log.playerId);
-    }
-  }
-
-  function isOverlapping(spriteA, spriteB) {
-    const topLeft = {
-      x: spriteB.x - (spriteB.width / 2),
-      y: spriteB.y - (spriteB.height / 2),
-    };
-    return spriteA.x >= topLeft.x &&
-      spriteA.y >= topLeft.y &&
-      spriteA.x < (topLeft.x + spriteB.width) &&
-      spriteA.y < (topLeft.y + spriteB.height);
-  }
-
-  function createDraggableLog() {
-    draggableLog = createLog(currentPlayerId, logStartPosition.x, logStartPosition.y, true)
+  function setFireAnimation(animation) {
+    fire.anims.play(animation);
   }
 }

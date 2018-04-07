@@ -1,42 +1,29 @@
-const Loki = require('lokijs');
 const nanoid = require('nanoid');
 
 module.exports = function startGameServer(io) {
-  const db = new Loki();
-  const players = db.addCollection('players');
-
-  io.on('connection', socket => {
-    const player = {
-      id: nanoid(),
-      x: Math.random() * 800,
-      y: Math.random() * 600,
-    };
-    const playerId = player.id;
-    players.insert(player);
-
-    socket.on('ready', () => {
-      socket.emit('init', {
-        yourId: player.id,
-        players: players.find(),
-      });
-      socket.broadcast.emit('addPlayer', player);
-    });
-
-    socket.on('moveLog', ({x, y}) => {
-      socket.broadcast.emit('moveLog', {
-        playerId,
-        x, y,
-      });
-    });
-
-    socket.on('destroyLog', () => {
-      console.log('destroyLog', playerId);
-      socket.broadcast.emit('destroyLog', { playerId });
-    });
-
-    socket.on('disconnect', () => {
-      players.findAndRemove({id: playerId});
-      socket.broadcast.emit('removePlayer', { playerId });
-    });
-  });
+  io.on('connection', onConnect);
 };
+
+function onConnect(socket) {
+  const player = {
+    id: nanoid(),
+    x: Math.random() * 800,
+    y: Math.random() * 600,
+  };
+  const playerId = player.id;
+
+  socket.on('ready', () => {
+    socket.emit('init', {
+      yourId: player.id
+    });
+    socket.broadcast.emit('addPlayer', player);
+  });
+
+  socket.on('grabLog', log => socket.broadcast.emit('grabLog', log));
+  socket.on('moveLog', log => socket.broadcast.emit('moveLog', log));
+  socket.on('dropLog', log => socket.broadcast.emit('dropLog', log));
+
+  socket.on('disconnect', () => {
+
+  });
+}
