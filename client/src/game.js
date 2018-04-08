@@ -12,6 +12,7 @@ const center = {x: width / 2, y: height / 2};
 
 export default function startGame() {
   return new Phaser.Game({
+    el: '.game',
     width, height,
     type: Phaser.AUTO,
     physics: {
@@ -36,6 +37,7 @@ function preload() {
 function create() {
   const game = this;
   const logs = new Map();
+  const sticks = new Map();
   const background = this.add.sprite(center.x, center.y, 'campingscene', 'background.png').setScale(0.5);
   const firePosition = {
     x: 200,
@@ -53,6 +55,8 @@ function create() {
   const fire = createFire();
   createLog({x: firePosition.x - 50, y: firePosition.y - 10, spriteId: 'log_a'});
   createLog({x: firePosition.x + 20, y: firePosition.y - 10, spriteId: 'log_b'});
+
+  createDraggableStick({x: width - 50, y: height - 150, spriteId: 'stick_a.png'});
 
   // Add draggable logs
   const draggableLogs = ['log_a', 'log_b', 'log_c'].map((spriteId, i) => {
@@ -79,6 +83,31 @@ function create() {
     if(log) {
       log.getSprite().destroy();
       logs.delete(log.id);
+    }
+  });
+
+  socket.on('grabStick', createStick);
+  socket.on('moveStick', remoteStick => {
+    const stick = sticks.get(remoteStick.id);
+    if(stick) {
+      stick.updatePosition(remoteStick.x, remoteStick.y);
+    } else {
+      createStick(remoteStick);
+    }
+  });
+
+  socket.on('dropStick', remoteStick => {
+    const stick = sticks.get(remoteStick.id);
+    if(stick) {
+      Object.values(stick.getSprites()).forEach(sprite => sprite.destroy());
+      sticks.delete(stick.id);
+    }
+  });
+
+  socket.on('cook', remoteStick => {
+    const stick = sticks.get(remoteStick.id);
+    if(stick) {
+      stick.setCookLevel(remoteStick.cookLevel);
     }
   });
 
@@ -110,7 +139,7 @@ function create() {
           game.tweens.add({
             targets: [sprite],
             x, y,
-            duration: 100,
+            duration
           });
         } else {
           log.updatePosition(x, y);
@@ -119,6 +148,89 @@ function create() {
     };
     logs.set(log.id, log);
     return log;
+  }
+
+  function createStick({ id, x, y, spriteId, cookLevel = 1 }) {
+    const group = game.add.group();
+    const stick = game.add.sprite(x, y, 'campingscene', spriteId).setScale(0.5);
+    const marshmallowOffset = {x: 2, y: -55};
+    const marshmallow = game.add.sprite(x + marshmallowOffset.x, y + marshmallowOffset.y, 'campingscene', 'cooking/1.png').setScale(0.25);
+
+    const stickObject = {
+      id: id || nanoid(),
+      x, y, spriteId, cookLevel,
+      getSprites() {
+        return {marshmallow, stick}
+      },
+
+      updatePosition(x, y) {
+        this.x = x;
+        this.y = y;
+        stick.x = x;
+        stick.y = y;
+        marshmallow.x = x + marshmallowOffset.x;
+        marshmallow.y = y + marshmallowOffset.y;
+      },
+
+      reset() {
+        this.updatePosition(x, y);
+        this.setCookLevel(1);
+      },
+
+      setCookLevel(cookLevel) {
+        this.cookLevel = cookLevel;
+        switch(cookLevel) {
+          case 2: marshmallow.setTexture('campingscene', 'cooking/2.png'); break;
+          case 3: marshmallow.setTexture('campingscene', 'cooking/3.png'); break;
+          default: marshmallow.setTexture('campingscene', 'cooking/1.png');
+        }
+      }
+    };
+    stickObject.setCookLevel(cookLevel);
+    sticks.set(stickObject.id, stickObject);
+    return stickObject;
+  }
+
+  function createDraggableStick(props) {
+    const stick = createStick(props);
+    const sprites = stick.getSprites();
+    let cookInterval = null;
+
+    sprites.stick.setInteractive();
+    game.input.setDraggable(sprites.stick);
+
+    sprites.stick.on('dragstart', () => socket.emit('grabStick', stick));
+
+    sprites.stick.on('drag', (pointer, x, y) => {
+      stick.updatePosition(x, y);
+      socket.emit('moveStick', stick);
+
+      if(isOverlapping(sprites.marshmallow, fire)) {
+        if(!cookInterval) cookInterval = setInterval(() => {
+          if(stick.cookLevel < 3) {
+            stick.setCookLevel(stick.cookLevel + 1);
+            socket.emit('cook', stick);
+          }
+        }, 1000);
+      } else {
+        clearCookInterval();
+      }
+    });
+
+    sprites.stick.on('dragend', () => {
+      socket.emit('dropStick', stick);
+      stick.reset();
+      clearCookInterval();
+    });
+
+    function clearCookInterval() {
+      if(cookInterval) {
+        clearInterval(cookInterval);
+        cookInterval = null;
+      }
+    }
+
+    return stick;
   }
 
   function createDraggableLog(props) {

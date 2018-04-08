@@ -35,6 +35,11 @@ function onConnect(socket, io) {
   socket.on('moveLog', log => socket.broadcast.emit('moveLog', log));
   socket.on('dropLog', log => socket.broadcast.emit('dropLog', log));
 
+  socket.on('grabStick', stick => socket.broadcast.emit('grabStick', stick));
+  socket.on('moveStick', stick => socket.broadcast.emit('moveStick', stick));
+  socket.on('dropStick', stick => socket.broadcast.emit('dropStick', stick));
+  socket.on('cook', stick => socket.broadcast.emit('cook', stick));
+
   socket.on('disconnect', () => {
 
   });
@@ -44,5 +49,5 @@ function onConnect(socket, io) {
       fireLevel -= 1;
       io.emit('fireLevel', { fireLevel });
     }
-  }, 30000);
+  }, 10000);
 }
